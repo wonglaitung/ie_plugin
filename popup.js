@@ -1,11 +1,46 @@
 (function() {
     'use strict';
 
+    // Global variables
+    let pageContent = null;
+    let chatHistory = [];
+
+    // DOM Elements
     const readBtn = document.getElementById('readBtn');
     const resultDiv = document.getElementById('result');
+    const tabs = document.querySelectorAll('.tab');
+    const tabContents = document.querySelectorAll('.tab-content');
+    const chatMessages = document.getElementById('chatMessages');
+    const chatInput = document.getElementById('chatInput');
+    const sendBtn = document.getElementById('sendBtn');
+    const settingsBtn = document.getElementById('settingsBtn');
+    const settingsModal = document.getElementById('settingsModal');
+    const apiKeyInput = document.getElementById('apiKey');
+    const saveSettingsBtn = document.getElementById('saveSettings');
+    const cancelSettingsBtn = document.getElementById('cancelSettings');
 
-    // Function to display content
+    // ==================== Tab Switching ====================
+    tabs.forEach(tab => {
+        tab.addEventListener('click', function() {
+            const targetTab = this.dataset.tab;
+
+            // Update tab styles
+            tabs.forEach(t => t.classList.remove('active'));
+            this.classList.add('active');
+
+            // Update content visibility
+            tabContents.forEach(content => {
+                content.classList.remove('active');
+                if (content.id === targetTab + '-tab') {
+                    content.classList.add('active');
+                }
+            });
+        });
+    });
+
+    // ==================== Content Extraction Functions ====================
     function displayContent(content) {
+        pageContent = content;
         let html = '';
 
         // Basic Info
@@ -73,9 +108,11 @@
         }
 
         resultDiv.innerHTML = html;
+
+        // Update AI chat greeting
+        updateAIGreeting();
     }
 
-    // Function to escape HTML
     function escapeHtml(text) {
         if (!text) return '';
         const div = document.createElement('div');
@@ -83,17 +120,14 @@
         return div.innerHTML;
     }
 
-    // Function to show error
     function showError(message) {
         resultDiv.innerHTML = '<div class="error">Error: ' + escapeHtml(message) + '</div>';
     }
 
-    // Function to show loading
     function showLoading() {
         resultDiv.innerHTML = '<div class="loading">⏳ Loading page content...<br><small>Waiting for dynamic content (up to 3 seconds)</small></div>';
     }
 
-    // Function to inject content script
     function injectContentScript(tabId, callback) {
         chrome.scripting.executeScript({
             target: { tabId: tabId },
@@ -107,15 +141,12 @@
         });
     }
 
-    // Function to get page content with fallback
     function getPageContentWithFallback(tabId, retryCount = 0, waitTime = 3000) {
         chrome.tabs.sendMessage(tabId, {action: 'getPageContent', waitTime: waitTime}, function(response) {
             if (chrome.runtime.lastError) {
-                // Content script not found, try to inject it
                 if (retryCount < 2) {
                     injectContentScript(tabId, function(success) {
                         if (success) {
-                            // Wait a bit for the script to initialize, then retry
                             setTimeout(() => {
                                 getPageContentWithFallback(tabId, retryCount + 1, waitTime);
                             }, 300);
@@ -141,12 +172,10 @@
         });
     }
 
-    // Event listener for read button
     readBtn.addEventListener('click', function() {
         readBtn.disabled = true;
         showLoading();
 
-        // Query active tab
         chrome.tabs.query({active: true, currentWindow: true}, function(tabs) {
             if (tabs.length === 0) {
                 showError('No active tab found');
@@ -156,21 +185,221 @@
 
             const activeTab = tabs[0];
 
-            // Check if we can access the tab
             if (activeTab.url.startsWith('chrome://') || activeTab.url.startsWith('edge://') || activeTab.url.startsWith('about:')) {
                 readBtn.disabled = false;
                 showError('Cannot read content from this page (browser internal page)');
                 return;
             }
 
-            // Try to get page content with fallback
             getPageContentWithFallback(activeTab.id);
         });
     });
 
-    // Auto-read when popup opens (optional)
+    // ==================== API Key Management ====================
+    function saveApiKey(apiKey) {
+        chrome.storage.local.set({qwenApiKey: apiKey}, function() {
+            console.log('API Key saved');
+        });
+    }
+
+    function loadApiKey(callback) {
+        chrome.storage.local.get(['qwenApiKey'], function(result) {
+            callback(result.qwenApiKey || '');
+        });
+    }
+
+    settingsBtn.addEventListener('click', function() {
+        loadApiKey(function(apiKey) {
+            apiKeyInput.value = apiKey;
+            settingsModal.classList.add('active');
+        });
+    });
+
+    cancelSettingsBtn.addEventListener('click', function() {
+        settingsModal.classList.remove('active');
+    });
+
+    saveSettingsBtn.addEventListener('click', function() {
+        const apiKey = apiKeyInput.value.trim();
+        saveApiKey(apiKey);
+        settingsModal.classList.remove('active');
+    });
+
+    // Close modal when clicking outside
+    settingsModal.addEventListener('click', function(e) {
+        if (e.target === settingsModal) {
+            settingsModal.classList.remove('active');
+        }
+    });
+
+    // ==================== AI Chat Functions ====================
+    function updateAIGreeting() {
+        if (pageContent) {
+            const greeting = document.createElement('div');
+            greeting.className = 'message ai';
+            greeting.textContent = '✅ 页面内容已提取！现在你可以问我关于这个网页的任何问题了。';
+            chatMessages.appendChild(greeting);
+            scrollToBottom();
+        }
+    }
+
+    function addMessage(content, type) {
+        const message = document.createElement('div');
+        message.className = 'message ' + type;
+        message.textContent = content;
+        chatMessages.appendChild(message);
+        scrollToBottom();
+    }
+
+    function showTypingIndicator() {
+        const indicator = document.createElement('div');
+        indicator.className = 'message ai';
+        indicator.innerHTML = '<div class="typing-indicator"><span></span><span></span><span></span></div>';
+        indicator.id = 'typingIndicator';
+        chatMessages.appendChild(indicator);
+        scrollToBottom();
+    }
+
+    function removeTypingIndicator() {
+        const indicator = document.getElementById('typingIndicator');
+        if (indicator) {
+            indicator.remove();
+        }
+    }
+
+    function scrollToBottom() {
+        chatMessages.scrollTop = chatMessages.scrollHeight;
+    }
+
+    function buildPrompt(pageContent, userQuestion) {
+        let contentText = '';
+
+        // Build content summary
+        if (pageContent.title) {
+            contentText += `标题: ${pageContent.title}\n\n`;
+        }
+        if (pageContent.bodyText) {
+            contentText += `正文内容:\n${pageContent.bodyText.substring(0, 3000)}\n`;
+        }
+        if (pageContent.links && pageContent.links.length > 0) {
+            contentText += `\n链接 (${pageContent.links.length}个):\n`;
+            pageContent.links.slice(0, 10).forEach(link => {
+                contentText += `- ${link.text}: ${link.href}\n`;
+            });
+        }
+
+        return {
+            role: 'user',
+            content: `请基于以下网页内容回答问题：
+
+【网页内容】
+${contentText}
+
+【用户问题】
+${userQuestion}
+
+请提供准确、简洁的回答。`
+        };
+    }
+
+    async function callQwenAPI(apiKey, messages) {
+        try {
+            const response = await fetch('https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions', {
+                method: 'POST',
+                headers: {
+                    'Authorization': `Bearer ${apiKey}`,
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    model: 'qwen-plus-2025-07-28',
+                    messages: messages,
+                    max_tokens: 32768,
+                    temperature: 0.7,
+                    top_p: 0.8
+                })
+            });
+
+            if (!response.ok) {
+                const errorData = await response.json();
+                throw new Error(errorData.message || 'API request failed');
+            }
+
+            const data = await response.json();
+            return data.choices[0].message.content;
+        } catch (error) {
+            console.error('Qwen API Error:', error);
+            throw error;
+        }
+    }
+
+    async function sendMessage() {
+        const userMessage = chatInput.value.trim();
+        if (!userMessage) return;
+
+        // Check if API key is configured
+        loadApiKey(function(apiKey) {
+            if (!apiKey) {
+                addMessage('请先在"API 设置"中配置你的 Qwen API Key。', 'ai');
+                return;
+            }
+
+            // Disable input
+            chatInput.disabled = true;
+            sendBtn.disabled = true;
+
+            // Add user message
+            addMessage(userMessage, 'user');
+            chatInput.value = '';
+
+            // Check if page content is available
+            if (!pageContent) {
+                addMessage('请先在"内容提取"标签页提取页面内容，然后再提问。', 'ai');
+                chatInput.disabled = false;
+                sendBtn.disabled = false;
+                return;
+            }
+
+            // Show typing indicator
+            showTypingIndicator();
+
+            // Build messages for API
+            const messages = [
+                {
+                    role: 'system',
+                    content: '你是一个智能助手，擅长分析网页内容并回答用户问题。请基于提供的网页内容给出准确、简洁的回答。'
+                },
+                buildPrompt(pageContent, userMessage)
+            ];
+
+            // Call API
+            callQwenAPI(apiKey, messages)
+                .then(aiResponse => {
+                    removeTypingIndicator();
+                    addMessage(aiResponse, 'ai');
+                    chatInput.disabled = false;
+                    sendBtn.disabled = false;
+                })
+                .catch(error => {
+                    removeTypingIndicator();
+                    addMessage('抱歉，发生了错误：' + error.message, 'ai');
+                    chatInput.disabled = false;
+                    sendBtn.disabled = false;
+                });
+        });
+    }
+
+    sendBtn.addEventListener('click', sendMessage);
+
+    chatInput.addEventListener('keypress', function(e) {
+        if (e.key === 'Enter' && !e.shiftKey) {
+            e.preventDefault();
+            sendMessage();
+        }
+    });
+
+    // ==================== Initialize ====================
     document.addEventListener('DOMContentLoaded', function() {
-        // Uncomment the line below to auto-read on popup open
+        // Auto-read on popup open (optional)
         // readBtn.click();
     });
 })();
