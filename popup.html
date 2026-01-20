@@ -367,19 +367,19 @@
         <div class="modal-content">
             <h3>⚙️ API 设置</h3>
             <div class="form-group">
-                <label for="apiKey">Qwen API Key</label>
-                <input type="password" id="apiKey" placeholder="输入你的 Qwen API Key">
-                <small>你的 API Key 将安全地存储在本地浏览器中</small>
-            </div>
-            <div class="form-group">
                 <label for="apiUrl">API URL</label>
                 <input type="text" id="apiUrl" placeholder="输入 API URL（可选）">
-                <small>默认使用 Qwen API，留空则使用默认 URL</small>
+                <small>API 端点地址，留空则使用默认 URL</small>
             </div>
             <div class="form-group">
                 <label for="modelName">模型名称</label>
                 <input type="text" id="modelName" placeholder="输入模型名称（可选）">
-                <small>默认使用 qwen-plus-2025-07-28，留空则使用默认模型</small>
+                <small>使用的模型，留空则使用默认模型</small>
+            </div>
+            <div class="form-group">
+                <label for="apiKey">API Key</label>
+                <input type="password" id="apiKey" placeholder="输入你的 API Key">
+                <small>认证密钥，将安全地存储在本地浏览器中</small>
             </div>
             <div class="modal-actions">
                 <button id="cancelSettings" class="btn btn-secondary">取消</button>
