@@ -30,3 +30,6 @@ yarn-error.log*
 # Temporary files
 *.tmp
 *.temp
+
+# References directory (contains sensitive information)
+References/
