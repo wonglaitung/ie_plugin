@@ -286,6 +286,14 @@
         message.textContent = content;
         chatMessages.appendChild(message);
         scrollToBottom();
+
+        // Save to chat history (skip system messages and greetings)
+        if (type === 'user' || type === 'ai') {
+            chatHistory.push({
+                role: type === 'user' ? 'user' : 'assistant',
+                content: content
+            });
+        }
     }
 
     function showTypingIndicator() {
@@ -308,7 +316,7 @@
         chatMessages.scrollTop = chatMessages.scrollHeight;
     }
 
-    function buildPrompt(pageContent, userQuestion) {
+    function buildPrompt(pageContent) {
         let contentText = '';
 
         // Build content summary
@@ -326,16 +334,8 @@
         }
 
         return {
-            role: 'user',
-            content: `请基于以下网页内容回答问题：
-
-【网页内容】
-${contentText}
-
-【用户问题】
-${userQuestion}
-
-请提供准确、简洁的回答。`
+            role: 'system',
+            content: `【网页内容】\n${contentText}\n请基于以上网页内容回答用户的问题。`
         };
     }
 
@@ -443,10 +443,25 @@ ${userQuestion}
             const messages = [
                 {
                     role: 'system',
-                    content: '你是一个智能助手，擅长分析网页内容并回答用户问题。请基于提供的网页内容给出准确、简洁的回答。'
-                },
-                buildPrompt(pageContent, userMessage)
+                    content: '你是一个智能助手，擅长分析网页内容并回答用户问题。请基于提供的网页内容和对话历史给出准确、简洁的回答。'
+                }
             ];
+
+            // If this is the first message, add page context
+            if (chatHistory.length === 0) {
+                messages.push(buildPrompt(pageContent));
+            }
+
+            // Add conversation history (limit to last 10 messages to avoid token overflow)
+            const maxHistoryLength = 10;
+            const historyToAdd = chatHistory.slice(-maxHistoryLength);
+            messages.push(...historyToAdd);
+
+            // Add current user message
+            messages.push({
+                role: 'user',
+                content: userMessage
+            });
 
             // Call API
             loadApiUrl(function(apiUrl) {
