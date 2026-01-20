@@ -447,10 +447,8 @@
                 }
             ];
 
-            // If this is the first message, add page context
-            if (chatHistory.length === 1) { // Only the current user message is in history
-                messages.push(buildPrompt(pageContent));
-            }
+            // Always add page context
+            messages.push(buildPrompt(pageContent));
 
             // Add conversation history (limit to last 10 messages to avoid token overflow)
             const maxHistoryLength = 10;
