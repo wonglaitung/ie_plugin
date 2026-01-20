@@ -348,9 +348,10 @@
 
             console.log('Calling API URL:', url);
             console.log('Using model:', model);
+            console.log('Number of messages:', messages.length);
             console.log('Request payload:', {
                 model: model,
-                messages: messages,
+                messages: messages.map(m => ({ role: m.role, content: m.content.substring(0, 100) + '...' })),
                 max_tokens: 32768,
                 temperature: 0.7,
                 top_p: 0.8
@@ -372,6 +373,7 @@
             });
 
             console.log('Response status:', response.status);
+            console.log('Response headers:', Object.fromEntries(response.headers.entries()));
 
             if (!response.ok) {
                 let errorData;
@@ -381,7 +383,17 @@
                     errorData = { message: response.statusText };
                 }
                 console.error('API Error Response:', errorData);
-                throw new Error(errorData.message || errorData.error || `API request failed with status ${response.status}`);
+
+                // Provide more specific error messages
+                if (response.status === 404) {
+                    throw new Error(`API 端点不存在 (404)。请检查：\n1. API URL 是否正确：${url}\n2. 模型名称是否存在：${model}\n3. API 服务是否正常运行`);
+                } else if (response.status === 401) {
+                    throw new Error('API Key 无效或已过期。请检查 API Key 配置。');
+                } else if (response.status === 429) {
+                    throw new Error('API 请求频率超限。请稍后再试。');
+                } else {
+                    throw new Error(errorData.message || errorData.error || `API request failed with status ${response.status}`);
+                }
             }
 
             const data = await response.json();
