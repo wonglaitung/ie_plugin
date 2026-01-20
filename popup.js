@@ -16,6 +16,7 @@
     const settingsBtn = document.getElementById('settingsBtn');
     const settingsModal = document.getElementById('settingsModal');
     const apiKeyInput = document.getElementById('apiKey');
+    const apiUrlInput = document.getElementById('apiUrl');
     const saveSettingsBtn = document.getElementById('saveSettings');
     const cancelSettingsBtn = document.getElementById('cancelSettings');
 
@@ -208,10 +209,25 @@
         });
     }
 
+    function saveApiUrl(apiUrl) {
+        chrome.storage.local.set({qwenApiUrl: apiUrl}, function() {
+            console.log('API URL saved');
+        });
+    }
+
+    function loadApiUrl(callback) {
+        chrome.storage.local.get(['qwenApiUrl'], function(result) {
+            callback(result.qwenApiUrl || '');
+        });
+    }
+
     settingsBtn.addEventListener('click', function() {
         loadApiKey(function(apiKey) {
-            apiKeyInput.value = apiKey;
-            settingsModal.classList.add('active');
+            loadApiUrl(function(apiUrl) {
+                apiKeyInput.value = apiKey;
+                apiUrlInput.value = apiUrl;
+                settingsModal.classList.add('active');
+            });
         });
     });
 
@@ -221,7 +237,9 @@
 
     saveSettingsBtn.addEventListener('click', function() {
         const apiKey = apiKeyInput.value.trim();
+        const apiUrl = apiUrlInput.value.trim();
         saveApiKey(apiKey);
+        saveApiUrl(apiUrl);
         settingsModal.classList.remove('active');
     });
 
@@ -302,9 +320,12 @@ ${userQuestion}
         };
     }
 
-    async function callQwenAPI(apiKey, messages) {
+    async function callQwenAPI(apiKey, messages, apiUrl) {
         try {
-            const response = await fetch('https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions', {
+            const defaultUrl = 'https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions';
+            const url = apiUrl || defaultUrl;
+
+            const response = await fetch(url, {
                 method: 'POST',
                 headers: {
                     'Authorization': `Bearer ${apiKey}`,
@@ -372,19 +393,21 @@ ${userQuestion}
             ];
 
             // Call API
-            callQwenAPI(apiKey, messages)
-                .then(aiResponse => {
-                    removeTypingIndicator();
-                    addMessage(aiResponse, 'ai');
-                    chatInput.disabled = false;
-                    sendBtn.disabled = false;
-                })
-                .catch(error => {
-                    removeTypingIndicator();
-                    addMessage('抱歉，发生了错误：' + error.message, 'ai');
-                    chatInput.disabled = false;
-                    sendBtn.disabled = false;
-                });
+            loadApiUrl(function(apiUrl) {
+                callQwenAPI(apiKey, messages, apiUrl)
+                    .then(aiResponse => {
+                        removeTypingIndicator();
+                        addMessage(aiResponse, 'ai');
+                        chatInput.disabled = false;
+                        sendBtn.disabled = false;
+                    })
+                    .catch(error => {
+                        removeTypingIndicator();
+                        addMessage('抱歉，发生了错误：' + error.message, 'ai');
+                        chatInput.disabled = false;
+                        sendBtn.disabled = false;
+                    });
+            });
         });
     }
 
