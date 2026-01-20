@@ -325,6 +325,15 @@ ${userQuestion}
             const defaultUrl = 'https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions';
             const url = apiUrl || defaultUrl;
 
+            console.log('Calling API URL:', url);
+            console.log('Request payload:', {
+                model: 'qwen-plus-2025-07-28',
+                messages: messages,
+                max_tokens: 32768,
+                temperature: 0.7,
+                top_p: 0.8
+            });
+
             const response = await fetch(url, {
                 method: 'POST',
                 headers: {
@@ -340,12 +349,37 @@ ${userQuestion}
                 })
             });
 
+            console.log('Response status:', response.status);
+
             if (!response.ok) {
-                const errorData = await response.json();
-                throw new Error(errorData.message || 'API request failed');
+                let errorData;
+                try {
+                    errorData = await response.json();
+                } catch (e) {
+                    errorData = { message: response.statusText };
+                }
+                console.error('API Error Response:', errorData);
+                throw new Error(errorData.message || errorData.error || `API request failed with status ${response.status}`);
             }
 
             const data = await response.json();
+            console.log('API Response Data:', data);
+
+            // Validate response structure
+            if (!data) {
+                throw new Error('API returned empty response');
+            }
+
+            if (!data.choices || !Array.isArray(data.choices) || data.choices.length === 0) {
+                console.error('Invalid response structure:', data);
+                throw new Error('API returned invalid response format. Expected "choices" array.');
+            }
+
+            if (!data.choices[0].message || !data.choices[0].message.content) {
+                console.error('Invalid message structure:', data.choices[0]);
+                throw new Error('API returned invalid message format. Expected "message.content".');
+            }
+
             return data.choices[0].message.content;
         } catch (error) {
             console.error('Qwen API Error:', error);
