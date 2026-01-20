@@ -13,6 +13,7 @@
     const chatMessages = document.getElementById('chatMessages');
     const chatInput = document.getElementById('chatInput');
     const sendBtn = document.getElementById('sendBtn');
+    const clearBtn = document.getElementById('clearBtn');
     const settingsBtn = document.getElementById('settingsBtn');
     const settingsModal = document.getElementById('settingsModal');
     const apiKeyInput = document.getElementById('apiKey');
@@ -475,6 +476,13 @@ ${userQuestion}
             e.preventDefault();
             sendMessage();
         }
+    });
+
+    // Clear chat history
+    clearBtn.addEventListener('click', function() {
+        chatMessages.innerHTML = '';
+        addMessage('👋 你好！我可以帮你分析网页内容。请先在"内容提取"标签页提取页面内容，然后在这里输入你的问题。', 'ai');
+        chatHistory = [];
     });
 
     // ==================== Initialize ====================
