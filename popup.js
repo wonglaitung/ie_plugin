@@ -17,6 +17,7 @@
     const settingsModal = document.getElementById('settingsModal');
     const apiKeyInput = document.getElementById('apiKey');
     const apiUrlInput = document.getElementById('apiUrl');
+    const modelNameInput = document.getElementById('modelName');
     const saveSettingsBtn = document.getElementById('saveSettings');
     const cancelSettingsBtn = document.getElementById('cancelSettings');
 
@@ -221,12 +222,27 @@
         });
     }
 
+    function saveModelName(modelName) {
+        chrome.storage.local.set({qwenModelName: modelName}, function() {
+            console.log('Model Name saved');
+        });
+    }
+
+    function loadModelName(callback) {
+        chrome.storage.local.get(['qwenModelName'], function(result) {
+            callback(result.qwenModelName || '');
+        });
+    }
+
     settingsBtn.addEventListener('click', function() {
         loadApiKey(function(apiKey) {
             loadApiUrl(function(apiUrl) {
-                apiKeyInput.value = apiKey;
-                apiUrlInput.value = apiUrl;
-                settingsModal.classList.add('active');
+                loadModelName(function(modelName) {
+                    apiKeyInput.value = apiKey;
+                    apiUrlInput.value = apiUrl;
+                    modelNameInput.value = modelName;
+                    settingsModal.classList.add('active');
+                });
             });
         });
     });
@@ -238,8 +254,10 @@
     saveSettingsBtn.addEventListener('click', function() {
         const apiKey = apiKeyInput.value.trim();
         const apiUrl = apiUrlInput.value.trim();
+        const modelName = modelNameInput.value.trim();
         saveApiKey(apiKey);
         saveApiUrl(apiUrl);
+        saveModelName(modelName);
         settingsModal.classList.remove('active');
     });
 
@@ -320,14 +338,17 @@ ${userQuestion}
         };
     }
 
-    async function callQwenAPI(apiKey, messages, apiUrl) {
+    async function callQwenAPI(apiKey, messages, apiUrl, modelName) {
         try {
             const defaultUrl = 'https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions';
+            const defaultModel = 'qwen-plus-2025-07-28';
             const url = apiUrl || defaultUrl;
+            const model = modelName || defaultModel;
 
             console.log('Calling API URL:', url);
+            console.log('Using model:', model);
             console.log('Request payload:', {
-                model: 'qwen-plus-2025-07-28',
+                model: model,
                 messages: messages,
                 max_tokens: 32768,
                 temperature: 0.7,
@@ -341,7 +362,7 @@ ${userQuestion}
                     'Content-Type': 'application/json'
                 },
                 body: JSON.stringify({
-                    model: 'qwen-plus-2025-07-28',
+                    model: model,
                     messages: messages,
                     max_tokens: 32768,
                     temperature: 0.7,
@@ -428,19 +449,21 @@ ${userQuestion}
 
             // Call API
             loadApiUrl(function(apiUrl) {
-                callQwenAPI(apiKey, messages, apiUrl)
-                    .then(aiResponse => {
-                        removeTypingIndicator();
-                        addMessage(aiResponse, 'ai');
-                        chatInput.disabled = false;
-                        sendBtn.disabled = false;
-                    })
-                    .catch(error => {
-                        removeTypingIndicator();
-                        addMessage('抱歉，发生了错误：' + error.message, 'ai');
-                        chatInput.disabled = false;
-                        sendBtn.disabled = false;
-                    });
+                loadModelName(function(modelName) {
+                    callQwenAPI(apiKey, messages, apiUrl, modelName)
+                        .then(aiResponse => {
+                            removeTypingIndicator();
+                            addMessage(aiResponse, 'ai');
+                            chatInput.disabled = false;
+                            sendBtn.disabled = false;
+                        })
+                        .catch(error => {
+                            removeTypingIndicator();
+                            addMessage('抱歉，发生了错误：' + error.message, 'ai');
+                            chatInput.disabled = false;
+                            sendBtn.disabled = false;
+                        });
+                });
             });
         });
     }
