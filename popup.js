@@ -424,10 +424,6 @@
             chatInput.disabled = true;
             sendBtn.disabled = true;
 
-            // Add user message
-            addMessage(userMessage, 'user');
-            chatInput.value = '';
-
             // Check if page content is available
             if (!pageContent) {
                 addMessage('请先在"内容提取"标签页提取页面内容，然后再提问。', 'ai');
@@ -435,6 +431,10 @@
                 sendBtn.disabled = false;
                 return;
             }
+
+            // Add user message to UI and history
+            addMessage(userMessage, 'user');
+            chatInput.value = '';
 
             // Show typing indicator
             showTypingIndicator();
@@ -448,7 +448,7 @@
             ];
 
             // If this is the first message, add page context
-            if (chatHistory.length === 0) {
+            if (chatHistory.length === 1) { // Only the current user message is in history
                 messages.push(buildPrompt(pageContent));
             }
 
@@ -456,12 +456,6 @@
             const maxHistoryLength = 10;
             const historyToAdd = chatHistory.slice(-maxHistoryLength);
             messages.push(...historyToAdd);
-
-            // Add current user message
-            messages.push({
-                role: 'user',
-                content: userMessage
-            });
 
             // Call API
             loadApiUrl(function(apiUrl) {
