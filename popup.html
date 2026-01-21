@@ -381,6 +381,11 @@
                 <input type="password" id="apiKey" placeholder="输入你的 API Key">
                 <small>认证密钥，将安全地存储在本地浏览器中</small>
             </div>
+            <div class="form-group">
+                <label for="maxTokens">Max Tokens</label>
+                <input type="number" id="maxTokens" placeholder="输入最大 token 数（可选）" min="1" max="131072">
+                <small>AI 回复的最大 token 数，留空则使用默认值 65536</small>
+            </div>
             <div class="modal-actions">
                 <button id="cancelSettings" class="btn btn-secondary">取消</button>
                 <button id="saveSettings" class="btn">保存</button>
