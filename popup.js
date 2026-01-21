@@ -19,6 +19,7 @@
     const apiKeyInput = document.getElementById('apiKey');
     const apiUrlInput = document.getElementById('apiUrl');
     const modelNameInput = document.getElementById('modelName');
+    const maxTokensInput = document.getElementById('maxTokens');
     const saveSettingsBtn = document.getElementById('saveSettings');
     const cancelSettingsBtn = document.getElementById('cancelSettings');
 
@@ -291,14 +292,29 @@
         });
     }
 
+    function saveMaxTokens(maxTokens) {
+        chrome.storage.local.set({qwenMaxTokens: maxTokens}, function() {
+            console.log('Max Tokens saved');
+        });
+    }
+
+    function loadMaxTokens(callback) {
+        chrome.storage.local.get(['qwenMaxTokens'], function(result) {
+            callback(result.qwenMaxTokens || '');
+        });
+    }
+
     settingsBtn.addEventListener('click', function() {
         loadApiKey(function(apiKey) {
             loadApiUrl(function(apiUrl) {
                 loadModelName(function(modelName) {
-                    apiKeyInput.value = apiKey;
-                    apiUrlInput.value = apiUrl;
-                    modelNameInput.value = modelName;
-                    settingsModal.classList.add('active');
+                    loadMaxTokens(function(maxTokens) {
+                        apiKeyInput.value = apiKey;
+                        apiUrlInput.value = apiUrl;
+                        modelNameInput.value = modelName;
+                        maxTokensInput.value = maxTokens;
+                        settingsModal.classList.add('active');
+                    });
                 });
             });
         });
@@ -309,14 +325,28 @@
     });
 
     saveSettingsBtn.addEventListener('click', function() {
-        const apiKey = apiKeyInput.value.trim();
-        const apiUrl = apiUrlInput.value.trim();
-        const modelName = modelNameInput.value.trim();
-        saveApiKey(apiKey);
-        saveApiUrl(apiUrl);
-        saveModelName(modelName);
-        settingsModal.classList.remove('active');
-    });
+
+            const apiKey = apiKeyInput.value.trim();
+
+            const apiUrl = apiUrlInput.value.trim();
+
+            const modelName = modelNameInput.value.trim();
+
+            const maxTokens = maxTokensInput.value.trim();
+
+    
+
+            saveApiKey(apiKey);
+
+            saveApiUrl(apiUrl);
+
+            saveModelName(modelName);
+
+            saveMaxTokens(maxTokens);
+
+            settingsModal.classList.remove('active');
+
+        });
 
     // Close modal when clicking outside
     settingsModal.addEventListener('click', function(e) {
@@ -395,12 +425,14 @@
         };
     }
 
-    async function callQwenAPI(apiKey, messages, apiUrl, modelName) {
+    async function callQwenAPI(apiKey, messages, apiUrl, modelName, maxTokens) {
         try {
             const defaultUrl = 'https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions';
             const defaultModel = 'qwen-plus-2025-07-28';
+            const defaultMaxTokens = 65536;
             const url = apiUrl || defaultUrl;
             const model = modelName || defaultModel;
+            const tokens = maxTokens ? parseInt(maxTokens) : defaultMaxTokens;
 
             console.log('Calling API URL:', url);
             console.log('Using model:', model);
@@ -408,7 +440,7 @@
             console.log('Request payload:', {
                 model: model,
                 messages: messages.map(m => ({ role: m.role, content: m.content.substring(0, 100) + '...' })),
-                max_tokens: 32768,
+                max_tokens: tokens,
                 temperature: 0.7,
                 top_p: 0.8
             });
@@ -422,7 +454,7 @@
                 body: JSON.stringify({
                     model: model,
                     messages: messages,
-                    max_tokens: 32768,
+                    max_tokens: tokens,
                     temperature: 0.7,
                     top_p: 0.8
                 })
@@ -526,19 +558,21 @@
             // Call API
             loadApiUrl(function(apiUrl) {
                 loadModelName(function(modelName) {
-                    callQwenAPI(apiKey, messages, apiUrl, modelName)
-                        .then(aiResponse => {
-                            removeTypingIndicator();
-                            addMessage(aiResponse, 'ai');
-                            chatInput.disabled = false;
-                            sendBtn.disabled = false;
-                        })
-                        .catch(error => {
-                            removeTypingIndicator();
-                            addMessage('抱歉，发生了错误：' + error.message, 'ai');
-                            chatInput.disabled = false;
-                            sendBtn.disabled = false;
-                        });
+                    loadMaxTokens(function(maxTokens) {
+                        callQwenAPI(apiKey, messages, apiUrl, modelName, maxTokens)
+                            .then(aiResponse => {
+                                removeTypingIndicator();
+                                addMessage(aiResponse, 'ai');
+                                chatInput.disabled = false;
+                                sendBtn.disabled = false;
+                            })
+                            .catch(error => {
+                                removeTypingIndicator();
+                                addMessage('抱歉，发生了错误：' + error.message, 'ai');
+                                chatInput.disabled = false;
+                                sendBtn.disabled = false;
+                            });
+                    });
                 });
             });
         });

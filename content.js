@@ -177,19 +177,36 @@
         const iframes = Array.from(document.querySelectorAll('iframe'));
         const iframeContents = [];
 
-        iframes.forEach(iframe => {
+        console.log('[PageInsight-DIAG] 🔍 检测到', iframes.length, '个 iframe');
+
+        iframes.forEach((iframe, index) => {
             try {
                 if (iframe.contentDocument) {
+                    const iframeText = extractText(iframe.contentDocument.body);
                     iframeContents.push({
                         src: iframe.src,
                         title: iframe.contentDocument.title,
-                        text: extractText(iframe.contentDocument.body),
+                        text: iframeText,
                         html: iframe.contentDocument.body.innerHTML
+                    });
+                    console.log('[PageInsight-DIAG] ✅ iframe #' + (index + 1) + ' (同源):', {
+                        src: iframe.src,
+                        title: iframe.contentDocument.title,
+                        textLength: iframeText.length
                     });
                 }
             } catch (e) {
-                // Cross-origin iframe, skip
+                console.warn('[PageInsight-DIAG] ⚠️ iframe #' + (index + 1) + ' (跨源):', {
+                    src: iframe.src,
+                    reason: '跨源限制，无法访问内容'
+                });
             }
+        });
+
+        console.log('[PageInsight-DIAG] 📊 iframe 提取结果:', {
+            '总数': iframes.length,
+            '同源可访问': iframeContents.length,
+            '跨源不可访问': iframes.length - iframeContents.length
         });
 
         return iframeContents;
@@ -304,7 +321,9 @@
         }
 
         if (content.iframes.length > 0) {
-            console.warn('[PageInsight-DIAG] ⚠️ 检测到 iframe，可能影响内容提取');
+            console.warn('[PageInsight-DIAG] ⚠️ 检测到 ' + content.iframes.length + ' 个 iframe');
+            console.warn('[PageInsight-DIAG] ⚠️ iframe 内容已提取并包含在结果中');
+            console.warn('[PageInsight-DIAG] ⚠️ 注意: 跨源 iframe 的内容无法访问');
         }
 
         console.log('[PageInsight-DIAG] ========== 内容提取完成 ==========');
