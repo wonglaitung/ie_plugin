@@ -122,17 +122,18 @@
 
 ## 项目概述
 
-这是一个 **Edge 浏览器扩展**（Browser Extension），名为 "Page Content Reader"，用于读取和显示当前网页的内容。该扩展使用 **Manifest V3** 规范开发，主要功能包括提取页面标题、URL、元标签、链接、图片和文本内容预览。
+这是一个 **Edge 浏览器扩展**（Browser Extension），名为 "PageInsight"，用于提取当前网页的内容并提供 AI 驱动的智能分析和对话功能。该扩展使用 **Manifest V3** 规范开发，主要功能包括提取页面标题、URL、元标签、链接、图片和文本内容，并支持基于 OpenAI 兼容 API 的多轮对话分析。
 
 ### 主要技术栈
 
 - **浏览器扩展 API**: Chrome Extension API (兼容 Edge)
 - **Manifest 版本**: V3
-- **核心权限**: `activeTab`、`scripting`
+- **核心权限**: `activeTab`、`scripting`、`storage`
+- **主机权限**: `https://*/*`（支持所有 HTTPS API）
 - **脚本类型**: Content Scripts、Popup Scripts
 - **编程语言**: 原生 JavaScript (ES6+)
 - **样式**: 内联 CSS (在 popup.html 中)
-- **版本**: 1.0.0
+- **版本**: 2.0.0
 
 ### 项目架构
 
@@ -146,18 +147,21 @@ ie_plugin/
 ├── icon48.png             # 48x48 图标
 ├── icon128.png            # 128x128 图标
 ├── README.md              # 项目说明文档
-└── AGENTS.md              # 项目上下文文档（本文件）
+├── IFLOW.md               # 项目上下文文档（本文件）
+└── References/            # 参考资料目录
 ```
 
 ### 核心组件说明
 
 #### 1. manifest.json
-- **扩展名称**: Page Content Reader
-- **版本**: 1.0.0
-- **描述**: Reads and displays page content from Edge browser
+- **扩展名称**: PageInsight
+- **版本**: 2.0.0
+- **描述**: Extracts page content and provides AI-powered insights
 - **权限配置**:
   - `activeTab`: 访问当前活动标签页
   - `scripting`: 动态注入脚本
+  - `storage`: 本地存储 API Key 和设置
+- **主机权限**: `https://*/*`（支持所有 HTTPS API 调用）
 - **action**: 配置默认弹出窗口 `popup.html` 和图标
 - **content_scripts**: 在所有 URL (`<all_urls>`) 上注入 `content.js`
 - **icons**: 定义 16、48、128 三种尺寸的图标
@@ -172,39 +176,67 @@ ie_plugin/
   - Meta 标签（name、property、content）
   - 所有链接（文本和 href）
   - 所有图片（src 和 alt）
-- **消息监听**: 监听来自 popup 的 `getPageContent` 消息请求
+  - 动态内容加载状态 (`dynamicContentLoaded`)
+- **智能等待机制**:
+  - `isPageLoading()`: 检测页面是否仍在加载动态内容
+  - `waitForDynamicContent()`: 智能等待动态内容加载完成（最多 5 秒）
+  - 支持检测常见的加载指示器（.loading、.spinner、.loader、skeleton 等）
+- **消息监听**: 监听来自 popup 的 `getPageContent` 消息请求，支持自定义等待时间
 - **代码封装**: 使用 IIFE 和 `'use strict'` 严格模式
 
 #### 3. popup.html
-- **弹出窗口尺寸**: 宽度 400px，最小高度 500px
+- **弹出窗口尺寸**: 宽度 450px，最小高度 600px
 - **UI 结构**:
   - 渐变色头部（紫色渐变：#667eea → #764ba2）
-  - "Read Page Content" 按钮
-  - 结果展示区域（可滚动，最大高度 450px）
+  - 双标签页设计：📄 内容提取、🤖 AI 分析
+  - 内容提取标签页："Read Page Content" 按钮和结果展示区域
+  - AI 分析标签页：聊天界面（消息显示区、输入框、发送按钮）
+  - 设置模态框（API URL、模型名称、API Key 配置）
 - **样式特点**:
   - 现代设计：渐变色、圆角、阴影、悬停效果
   - 响应式布局
   - 内联 CSS 样式
   - 使用系统字体栈
+  - 打字指示器动画
+  - 自定义滚动条样式
 
 #### 4. popup.js
 - **核心功能**:
+  - 处理标签页切换（内容提取 ↔ AI 分析）
   - 处理 "Read Page Content" 按钮点击事件
   - 与 content script 通信获取页面数据
   - 实现内容脚本注入的回退机制（最多重试 2 次）
   - 格式化并显示提取的内容（分区块展示）
   - 处理错误情况（浏览器内部页面、权限问题等）
+  - **AI 对话功能**:
+    - 管理 API Key、API URL、模型名称的存储和加载
+    - 构建对话消息（系统提示、页面上下文、对话历史）
+    - 调用 OpenAI 兼容 API（支持 Qwen、GPT、Claude 等）
+    - 多轮对话管理（保留最近 10 条历史记录）
+    - 实时打字指示器
+    - 清除对话历史功能
 - **关键函数**:
   - `displayContent(content)`: 格式化显示页面内容
   - `escapeHtml(text)`: HTML 转义防止 XSS
   - `injectContentScript(tabId, callback)`: 动态注入内容脚本
-  - `getPageContentWithFallback(tabId, retryCount)`: 带重试机制的内容获取
+  - `getPageContentWithFallback(tabId, retryCount, waitTime)`: 带重试机制的内容获取
   - `showError(message)`: 显示错误信息
   - `showLoading()`: 显示加载状态
+  - `saveApiKey(apiKey) / loadApiKey(callback)`: API Key 存储管理
+  - `saveApiUrl(apiUrl) / loadApiUrl(callback)`: API URL 存储管理
+  - `saveModelName(modelName) / loadModelName(callback)`: 模型名称存储管理
+  - `addMessage(content, type)`: 添加聊天消息
+  - `showTypingIndicator() / removeTypingIndicator()`: 打字指示器管理
+  - `buildPrompt(pageContent)`: 构建页面上下文提示
+  - `callQwenAPI(apiKey, messages, apiUrl, modelName)`: 调用 AI API
+  - `sendMessage()`: 发送用户消息并获取 AI 回复
+  - `updateAIGreeting()`: 更新 AI 欢迎消息
 - **安全特性**:
   - 检查浏览器内部页面（chrome://、edge://、about:）
   - HTML 转义防止 XSS 攻击
   - 错误处理和用户友好提示
+  - API Key 安全存储在本地浏览器中
+  - 详细的错误日志记录
 
 ## 构建和运行
 
@@ -231,10 +263,44 @@ ie_plugin/
 
 ### 使用方法
 
+#### 第一步：提取页面内容
 1. 打开任意网页
-2. 点击浏览器工具栏中的扩展图标（Page Content Reader）
-3. 点击 "Read Page Content" 按钮
-4. 查看页面内容（基本信息、Meta 标签、链接、图片、文本预览）
+2. 点击浏览器工具栏中的扩展图标（PageInsight）
+3. 在"📄 内容提取"标签页点击"Read Page Content"按钮
+4. 等待内容提取完成（支持动态内容，最多等待 3 秒）
+5. 查看提取的页面内容（基本信息、Meta 标签、链接、图片、文本预览）
+
+#### 第二步：配置 AI 设置
+1. 切换到"🤖 AI 分析"标签页
+2. 点击"⚙️ API 设置"按钮
+3. 配置以下信息：
+   - **API URL**：API 端点地址（可选，留空使用默认 Qwen API）
+   - **模型名称**：使用的模型（可选，留空使用默认模型）
+   - **API Key**：认证密钥（必需）
+4. 点击"保存"
+
+#### 第三步：与 AI 对话
+1. 在输入框中输入你的问题
+2. 点击"发送"按钮或按 Enter 键
+3. AI 会基于页面内容和对话历史回答你的问题
+4. 支持多轮对话，AI 会记住之前的对话内容
+
+#### 第四步：清除对话
+点击"🗑️ 清除对话"按钮可以清空所有对话历史，重新开始。
+
+### 支持的 API
+
+本扩展支持任何兼容 OpenAI API 格式的服务：
+
+- **Qwen API**（默认）：`https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions`
+- **OpenAI API**：`https://api.openai.com/v1/chat/completions`
+- **其他兼容服务**：任何支持 OpenAI API 格式的服务
+
+### 推荐模型
+
+- Qwen 系列：`qwen-plus-2025-07-28`、`qwen-max`、`qwen-turbo`
+- OpenAI 系列：`gpt-4`、`gpt-3.5-turbo`、`gpt-4-turbo`
+- 其他：任何兼容的模型
 
 ### 调试方法
 
@@ -247,6 +313,7 @@ ie_plugin/
   - 右键点击扩展图标
   - 选择 "检查弹出内容"
   - 在 Console 标签查看 popup.js 的日志
+  - 查看 API 调用详情、错误信息等
 
 - **重新加载扩展**:
   - 在 `edge://extensions/` 页面找到扩展
@@ -260,14 +327,19 @@ ie_plugin/
 - **代码封装**: 使用 IIFE (立即执行函数表达式) 避免全局污染
 - **严格模式**: 使用 `'use strict'` 严格模式
 - **命名规范**:
-  - 函数使用驼峰命名法（`getPageContent`、`displayContent`）
-  - 变量使用驼峰命名法
+  - 函数使用驼峰命名法（`getPageContent`、`displayContent`、`sendMessage`）
+  - 变量使用驼峰命名法（`pageContent`、`chatHistory`）
   - 常量使用大写蛇形命名法（如需要）
 - **语法特性**:
   - 使用模板字符串
   - 使用现代 ES6+ 语法（箭头函数、解构、数组方法等）
   - 使用 `Array.from()` 和 `map()` 进行数组转换
   - 使用 `filter()` 进行数据过滤
+  - 使用 `async/await` 处理异步操作
+- **异步处理**:
+  - 使用 `Promise` 和 `async/await` 处理异步 API 调用
+  - 正确处理错误（try-catch）
+  - 提供详细的错误日志
 
 #### CSS
 - **样式位置**: 内联样式（在 popup.html 的 `<style>` 标签中）
@@ -277,37 +349,63 @@ ie_plugin/
   - 阴影效果（box-shadow）
   - 悬停动画效果（transform、transition）
 - **布局**:
-  - 固定宽度 400px
-  - 最小高度 500px
-  - 可滚动内容区域（max-height: 450px, overflow-y: auto）
+  - 固定宽度 450px
+  - 最小高度 600px
+  - 可滚动内容区域（max-height: 500px, overflow-y: auto）
+  - 聊天界面使用 flex 布局
 - **字体**: 使用系统字体栈（-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto 等）
+- **动画**:
+  - 打字指示器动画（typing-indicator）
+  - 按钮悬停效果（transform、transition）
+- **滚动条**:
+  - 自定义滚动条样式
+  - 宽度 8px，圆角设计
 
 ### 安全实践
 
 - **HTML 转义**: 在 popup.js 中使用 `escapeHtml()` 函数防止 XSS 攻击
   - 使用 `document.createElement('div')` 和 `textContent` 进行安全转义
-- **权限最小化**: 仅请求必要的权限（`activeTab`、`scripting`）
+- **权限最小化**: 仅请求必要的权限（`activeTab`、`scripting`、`storage`）
+- **主机权限**: 仅请求 HTTPS 主机权限（`https://*/*`）
 - **内容脚本隔离**: 使用 IIFE 避免与页面代码冲突
 - **错误处理**:
   - 检查 `chrome.runtime.lastError`
   - 提供友好的错误提示
   - 验证输入数据
+  - 详细的错误日志记录
 - **页面限制**: 检测并阻止访问浏览器内部页面
+- **API Key 安全**:
+  - 使用 `chrome.storage.local` 安全存储 API Key
+  - 不在代码中硬编码敏感信息
+  - 提供默认预设值（`12345678`）用于开发测试
 
 ### 消息传递机制
 
 - **Popup → Content Script**:
   - 使用 `chrome.tabs.sendMessage()` 发送 `getPageContent` 请求
-  - 消息格式: `{action: 'getPageContent'}`
+  - 消息格式: `{action: 'getPageContent', waitTime: 3000}`
+  - 支持自定义等待时间参数
 
 - **Content Script → Popup**:
   - 使用 `sendResponse()` 返回数据
   - 返回 `true` 保持消息通道开放（支持异步响应）
+  - 包含动态内容加载状态：`{..., dynamicContentLoaded: true/false}`
 
 - **回退机制**:
   - 如果 content script 未加载，使用 `chrome.scripting.executeScript()` 注入
   - 最多重试 2 次，每次间隔 300ms
   - 注入成功后自动重试消息发送
+
+### 对话流程
+
+扩展采用以下对话流程：
+
+1. **系统提示**：定义 AI 的角色和任务
+2. **页面上下文**：每次提问都包含完整的页面内容
+3. **对话历史**：保留最近 10 条对话记录
+4. **当前问题**：用户的新问题
+
+这种设计确保 AI 始终有完整的上下文信息，能够提供准确的回答。
 
 ### 数据提取规则
 
@@ -318,6 +416,32 @@ ie_plugin/
   - 文本预览：前 500 个字符
   - 列表项（链接、图片、Meta 标签）：仅显示前 5 个
   - 超过限制时显示 "... and X more" 提示
+- **动态内容加载**:
+  - 默认等待时间：3 秒
+  - 最大等待时间：5 秒
+  - 检查间隔：200ms
+  - 检测常见加载指示器（.loading、.spinner、.loader、skeleton 等）
+
+### API 调用规范
+
+- **默认配置**:
+  - API URL: `https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions`
+  - 模型名称: `qwen-plus-2025-07-28`
+  - 最大 tokens: 32768
+  - 温度: 0.7
+  - Top P: 0.8
+
+- **错误处理**:
+  - 404 错误：API 端点不存在或模型名称错误
+  - 401 错误：API Key 无效或已过期
+  - 429 错误：API 请求频率超限
+  - 其他错误：提供详细的错误信息和日志
+
+- **日志记录**:
+  - 记录 API URL 和模型名称
+  - 记录消息数量和请求负载（截断）
+  - 记录响应状态和头部信息
+  - 记录完整的响应数据和错误信息
 
 ## 限制和注意事项
 
@@ -327,16 +451,22 @@ ie_plugin/
 - 单页应用（SPA）可能需要手动刷新页面
 - 文本预览限制为前 500 个字符
 - 列表项仅显示前 5 个（链接、图片、Meta 标签）
+- 对话历史限制为最近 10 条消息
+- API 调用受网络和 API 服务限制影响
 
 ### 技术限制
 - 依赖 Chrome Extension API（Edge 兼容）
 - 不支持其他浏览器（Firefox、Safari）需要适配
 - 需要用户手动安装和授权
+- 需要有效的 API Key 才能使用 AI 功能
+- API 调用需要网络连接
 
 ### 使用注意事项
 - 首次使用可能需要刷新页面
 - 某些网站可能有安全限制，这是正常行为
 - 扩展图标需要正确配置才能显示
+- API Key 会存储在本地浏览器中，请勿在公共设备上使用
+- 动态内容加载最多等待 3 秒，超时后会显示警告
 
 ## 常见问题排查
 
@@ -368,12 +498,13 @@ ie_plugin/
 **可能原因**:
 - 网站有 CSP（内容安全策略）限制
 - 网站使用了 iframe 或 Shadow DOM
-- 网站动态加载内容
+- 网站动态加载内容未完成
 
 **解决方案**:
 1. 某些网站可能有安全限制，这是正常行为
 2. 尝试在页面完全加载后使用扩展
 3. 检查浏览器控制台是否有错误信息
+4. 等待动态内容加载完成（最多 3 秒）
 
 ### 问题：内容脚本未注入
 **可能原因**:
@@ -398,6 +529,50 @@ ie_plugin/
 2. 查看 Console 标签的错误信息
 3. 检查 popup.js 和 popup.html 是否正确
 
+### 问题：AI 回复错误或不相关
+**可能原因**:
+- API 配置不正确
+- API Key 无效
+- 页面内容未成功提取
+- 模型名称错误
+- API 端点不可用
+
+**解决方案**:
+1. 检查 API 配置是否正确（API URL、模型名称、API Key）
+2. 确认页面内容已成功提取
+3. 检查浏览器控制台的详细错误日志
+4. 尝试清除对话历史重新开始
+5. 验证 API 服务是否正常运行
+
+### 问题：API 调用失败（404 错误）
+**可能原因**:
+- API URL 不正确
+- 模型名称不存在
+- API 服务路径错误
+
+**解决方案**:
+1. 检查 API URL 是否正确，确保包含 `/v1/chat/completions`
+2. 验证模型名称是否存在
+3. 确认 API 服务是否正常运行
+
+### 问题：API 调用失败（401 错误）
+**可能原因**:
+- API Key 无效
+- API Key 已过期
+
+**解决方案**:
+1. 检查 API Key 是否正确
+2. 确认 API Key 是否已过期
+3. 重新配置 API Key
+
+### 问题：API 调用失败（429 错误）
+**可能原因**:
+- API 请求频率超限
+
+**解决方案**:
+1. 等待一段时间后再试
+2. 检查 API 服务的速率限制
+
 ## 扩展功能建议
 
 如需添加新功能，可以考虑：
@@ -408,18 +583,49 @@ ie_plugin/
 3. **历史记录**: 保存最近读取的页面内容（使用 chrome.storage）
 4. **自定义显示**: 允许用户选择要显示的内容类型
 5. **更多数据**: 提取表单、脚本、样式等更多信息
+6. **对话导出**: 导出对话历史为文本或 JSON 文件
+7. **多模型支持**: 支持同时配置多个 API 并快速切换
 
 ### 用户体验
-6. **快捷键支持**: 添加键盘快捷键触发内容读取
-7. **自动读取**: 打开弹出窗口时自动读取页面内容
-8. **复制功能**: 添加一键复制按钮
-9. **主题切换**: 支持深色/浅色主题
+8. **快捷键支持**: 添加键盘快捷键触发内容读取
+9. **自动读取**: 打开弹出窗口时自动读取页面内容
+10. **复制功能**: 添加一键复制按钮（复制页面内容、对话消息）
+11. **主题切换**: 支持深色/浅色主题
+12. **语音输入**: 支持语音输入问题
+13. **语音播报**: 支持 AI 回复的语音播报
 
 ### 技术改进
-10. **后台脚本**: 添加 background.js 处理更复杂的逻辑
-11. **选项页面**: 添加设置页面配置扩展行为
-12. **多语言支持**: 添加国际化支持
-13. **性能优化**: 优化大数据量页面的处理速度
+14. **后台脚本**: 添加 background.js 处理更复杂的逻辑
+15. **选项页面**: 添加设置页面配置扩展行为
+16. **多语言支持**: 添加国际化支持
+17. **性能优化**: 优化大数据量页面的处理速度
+18. **离线模式**: 支持离线查看已提取的内容
+19. **缓存机制**: 缓存页面内容，减少重复提取
+
+### AI 功能增强
+20. **流式响应**: 支持流式 API 响应，实时显示 AI 回复
+21. **多模态支持**: 支持图片识别和分析
+22. **代码高亮**: 支持 AI 回复中的代码高亮显示
+23. **Markdown 支持**: 支持 Markdown 格式的 AI 回复
+24. **自定义提示**: 允许用户自定义系统提示词
+25. **对话模板**: 提供常用对话模板（总结、翻译、分析等）
+
+## 更新日志
+
+### v2.0.0
+- 添加 AI 对话功能
+- 支持自定义 API URL 和模型名称
+- 实现多轮对话和对话历史
+- 添加清除对话功能
+- 改进动态内容加载
+- 优化错误处理和调试信息
+- 添加设置模态框（API URL、模型名称、API Key）
+- 实现打字指示器动画
+- 更新项目名称为 PageInsight
+
+### v1.0.0
+- 初始版本
+- 基本内容提取功能
 
 ## 许可证
 
