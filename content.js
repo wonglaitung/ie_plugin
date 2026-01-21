@@ -71,19 +71,27 @@
     function isPageLoading() {
         // Check if document is still loading
         if (document.readyState !== 'complete') {
+            console.warn('[PageInsight-DIAG] ⚠️ 页面未完全加载 - readyState:', document.readyState);
             return true;
         }
 
         // Check for loading indicators
+        const foundIndicators = [];
         for (const selector of LOADING_SELECTORS) {
             const elements = document.querySelectorAll(selector);
             for (const element of elements) {
                 if (isElementVisible(element)) {
-                    return true;
+                    foundIndicators.push(selector);
                 }
             }
         }
 
+        if (foundIndicators.length > 0) {
+            console.warn('[PageInsight-DIAG] ⚠️ 检测到加载指示器:', foundIndicators.join(', '));
+            return true;
+        }
+
+        console.log('[PageInsight-DIAG] ✅ 未检测到加载指示器');
         return false;
     }
 
@@ -93,22 +101,34 @@
     function isDOMStable() {
         const now = Date.now();
         const timeSinceLastMutation = now - lastMutationTime;
-        return timeSinceLastMutation >= STABLE_THRESHOLD;
+        const isStable = timeSinceLastMutation >= STABLE_THRESHOLD;
+
+        if (!isStable) {
+            console.warn('[PageInsight-DIAG] ⚠️ DOM 不稳定 - 距离上次变异仅', timeSinceLastMutation + 'ms', '阈值: ' + STABLE_THRESHOLD + 'ms', '变异次数:', mutationCount);
+        } else {
+            console.log('[PageInsight-DIAG] ✅ DOM 稳定 - 距离上次变异', timeSinceLastMutation + 'ms');
+        }
+
+        return isStable;
     }
 
     /**
      * Check if there are any visible popups/dialogs
      */
     function hasVisiblePopups() {
+        const visiblePopups = [];
         for (const selector of POPUP_SELECTORS) {
             const elements = document.querySelectorAll(selector);
             for (const element of elements) {
                 if (isElementVisible(element)) {
-                    return true;
+                    visiblePopups.push(selector);
                 }
             }
         }
-        return false;
+        if (visiblePopups.length > 0) {
+            console.warn('[PageInsight-DIAG] ⚠️ 检测到可见弹窗/对话框:', visiblePopups.join(', '));
+        }
+        return visiblePopups.length > 0;
     }
 
     /**
@@ -203,13 +223,31 @@
      * Extract all visible content from the page
      */
     function getPageContent() {
+        console.log('[PageInsight-DIAG] ========== 开始提取页面内容 ==========');
+
         // Use document.documentElement instead of document.body to capture everything
         const rootElement = document.documentElement || document.body;
 
-        return {
+        // Check if body exists
+        if (!document.body) {
+            console.error('[PageInsight-DIAG] ❌ 严重问题: document.body 不存在！');
+            console.error('[PageInsight-DIAG] ❌ 可能原因: 页面尚未加载完成或使用了特殊框架');
+        }
+
+        // Check body content
+        const bodyText = extractText(rootElement);
+        if (bodyText.length === 0) {
+            console.error('[PageInsight-DIAG] ❌ 严重问题: 页面文本内容为空！');
+            console.error('[PageInsight-DIAG] ❌ 可能原因: 内容未加载、使用 Shadow DOM 或使用了 iframe');
+        } else {
+            console.log('[PageInsight-DIAG] ✅ 页面文本长度:', bodyText.length, '字符');
+            console.log('[PageInsight-DIAG] 📝 文本预览:', bodyText.substring(0, 150) + '...');
+        }
+
+        const content = {
             title: document.title,
             url: window.location.href,
-            bodyText: extractText(rootElement),
+            bodyText: bodyText,
             html: rootElement.innerHTML,
             metaTags: Array.from(document.querySelectorAll('meta')).map(meta => ({
                 name: meta.getAttribute('name'),
@@ -249,6 +287,28 @@
             scrollHeight: document.documentElement.scrollHeight,
             viewportHeight: window.innerHeight
         };
+
+        // Log extraction summary with focus on potential issues
+        console.log('[PageInsight-DIAG] 📊 提取结果统计:', {
+            '链接数': content.links.length,
+            '图片数': content.images.length,
+            '表单数': content.forms.length,
+            '按钮数': content.buttons.length,
+            'Shadow DOM 数': content.shadowDOM.length,
+            'iframe 数': content.iframes.length,
+            '弹窗数': content.popups.length
+        });
+
+        if (content.shadowDOM.length > 0) {
+            console.warn('[PageInsight-DIAG] ⚠️ 检测到 Shadow DOM，可能影响内容提取');
+        }
+
+        if (content.iframes.length > 0) {
+            console.warn('[PageInsight-DIAG] ⚠️ 检测到 iframe，可能影响内容提取');
+        }
+
+        console.log('[PageInsight-DIAG] ========== 内容提取完成 ==========');
+        return content;
     }
 
     /**
@@ -262,11 +322,6 @@
         mutationObserver = new MutationObserver((mutations) => {
             lastMutationTime = Date.now();
             mutationCount += mutations.length;
-
-            // Limit mutation count to prevent infinite tracking
-            if (mutationCount > MAX_MUTATIONS) {
-                mutationCount = MAX_MUTATIONS;
-            }
         });
 
         mutationObserver.observe(document.documentElement, {
@@ -283,16 +338,35 @@
     function waitForDynamicContent(callback, maxWaitTime = 5000, checkInterval = 200) {
         const startTime = Date.now();
         let lastDOMSnapshot = document.documentElement.innerHTML;
+        let checkCount = 0;
+
+        console.log('[PageInsight-DIAG] ========== 开始等待动态内容加载 ==========');
+        console.log('[PageInsight-DIAG] ⏱️  配置:', {
+            '最大等待时间': maxWaitTime + 'ms',
+            '检查间隔': checkInterval + 'ms',
+            '初始 readyState': document.readyState
+        });
 
         // Set up mutation observer
         setupMutationObserver();
 
         function check() {
             const elapsed = Date.now() - startTime;
+            checkCount++;
 
             // Check if we've exceeded max wait time
             if (elapsed >= maxWaitTime) {
-                console.log('Page Content Reader: Timeout waiting for dynamic content');
+                console.error('[PageInsight-DIAG] ❌ 超时！等待动态内容失败');
+                console.error('[PageInsight-DIAG] ❌ 超时详情:', {
+                    '已等待': elapsed + 'ms',
+                    '总检查次数': checkCount,
+                    '最终变异次数': mutationCount,
+                    '最终 readyState': document.readyState
+                });
+                console.error('[PageInsight-DIAG] ❌ 可能原因:');
+                console.error('[PageInsight-DIAG] ❌   1. 页面持续加载（加载指示器一直存在）');
+                console.error('[PageInsight-DIAG] ❌   2. DOM 持续变化（页面一直在更新）');
+                console.error('[PageInsight-DIAG] ❌   3. 等待时间设置太短（当前: ' + maxWaitTime + 'ms）');
                 mutationObserver.disconnect();
                 callback({
                     loaded: false,
@@ -317,6 +391,9 @@
             // Check if DOM has changed significantly
             const currentSnapshot = document.documentElement.innerHTML;
             if (currentSnapshot !== lastDOMSnapshot) {
+                const diffLength = Math.abs(currentSnapshot.length - lastDOMSnapshot.length);
+                console.warn('[PageInsight-DIAG] ⚠️ DOM 内容发生变化，继续等待...');
+                console.warn('[PageInsight-DIAG] ⚠️ 变化大小:', diffLength + ' 字符');
                 lastDOMSnapshot = currentSnapshot;
                 setTimeout(check, checkInterval);
                 return;
@@ -324,7 +401,13 @@
 
             // All checks passed
             mutationObserver.disconnect();
-            console.log('Page Content Reader: Dynamic content loaded successfully');
+            console.log('[PageInsight-DIAG] ✅ 动态内容加载成功！');
+            console.log('[PageInsight-DIAG] ✅ 加载详情:', {
+                '总耗时': elapsed + 'ms',
+                '检查次数': checkCount,
+                'DOM 变异次数': mutationCount,
+                '最终 readyState': document.readyState
+            });
             callback({
                 loaded: true,
                 reason: 'stable',
@@ -344,7 +427,13 @@
         if (request.action === 'getPageContent') {
             const waitTime = request.waitTime || 3000; // Default 3 seconds wait
 
-            console.log('Page Content Reader: Starting content extraction...');
+            console.log('[PageInsight-DIAG] 📨 收到内容提取请求');
+            console.log('[PageInsight-DIAG] 📋 页面信息:', {
+                'URL': window.location.href,
+                '标题': document.title,
+                'readyState': document.readyState,
+                '等待时间': waitTime + 'ms'
+            });
 
             waitForDynamicContent(function(result) {
                 const content = getPageContent();
@@ -353,18 +442,13 @@
                 content.loadTime = result.elapsed;
                 content.mutationCount = result.mutations || 0;
                 content.hasPopups = hasVisiblePopups();
-                
-                console.log('Page Content Reader: Content extracted', {
-                    loaded: result.loaded,
-                    reason: result.reason,
-                    elapsed: result.elapsed,
-                    mutations: result.mutations,
-                    hasPopups: content.hasPopups,
-                    popupsCount: content.popups.length,
-                    shadowDOMCount: content.shadowDOM.length,
-                    iframeCount: content.iframes.length
-                });
-                
+
+                if (result.loaded) {
+                    console.log('[PageInsight-DIAG] ✅ 内容提取成功，发送响应');
+                } else {
+                    console.error('[PageInsight-DIAG] ❌ 内容提取失败，发送部分结果');
+                }
+
                 sendResponse(content);
             }, waitTime);
 

@@ -57,6 +57,11 @@
             const status = content.dynamicContentLoaded ? '✅ Dynamic content loaded' : '⚠️ Timeout waiting for dynamic content';
             const statusClass = content.dynamicContentLoaded ? 'success' : 'warning';
             html += '<div class="info-row"><span class="info-label">Status:</span><span class="info-value ' + statusClass + '">' + status + '</span></div>';
+
+            // Add debug info
+            html += '<div class="info-row"><span class="info-label">Load Reason:</span><span class="info-value">' + escapeHtml(content.loadReason || 'N/A') + '</span></div>';
+            html += '<div class="info-row"><span class="info-label">Load Time:</span><span class="info-value">' + (content.loadTime || 0) + 'ms</span></div>';
+            html += '<div class="info-row"><span class="info-label">Mutations:</span><span class="info-value">' + (content.mutationCount || 0) + '</span></div>';
         }
 
         html += '</div>';
@@ -124,6 +129,7 @@
     }
 
     function showError(message) {
+        console.error('[Popup-DIAG] ❌ 显示错误信息:', message);
         resultDiv.innerHTML = '<div class="error">Error: ' + escapeHtml(message) + '</div>';
     }
 
@@ -137,58 +143,108 @@
             files: ['content.js']
         }, () => {
             if (chrome.runtime.lastError) {
+                console.error('[Popup-DIAG] ❌ content.js 注入失败:', chrome.runtime.lastError.message);
                 callback(false);
             } else {
+                console.log('[Popup-DIAG] ✅ content.js 注入成功');
                 callback(true);
             }
         });
     }
 
     function getPageContentWithFallback(tabId, retryCount = 0, waitTime = 3000) {
+        console.log('[Popup-DIAG] ========== 开始获取页面内容 ==========');
+        console.log('[Popup-DIAG] 📋 请求参数:', {
+            '标签页 ID': tabId,
+            '重试次数': retryCount,
+            '等待时间': waitTime + 'ms'
+        });
+
         chrome.tabs.sendMessage(tabId, {action: 'getPageContent', waitTime: waitTime}, function(response) {
             if (chrome.runtime.lastError) {
+                console.error('[Popup-DIAG] ❌ Chrome 运行时错误:', chrome.runtime.lastError.message);
+                console.error('[Popup-DIAG] ❌ 错误详情:', {
+                    '重试次数': retryCount,
+                    '是否重试': retryCount < 2
+                });
+
                 if (retryCount < 2) {
+                    console.log('[Popup-DIAG] 🔄 尝试注入 content.js...');
                     injectContentScript(tabId, function(success) {
                         if (success) {
+                            console.log('[Popup-DIAG] ✅ 注入成功，300ms 后重试...');
                             setTimeout(() => {
                                 getPageContentWithFallback(tabId, retryCount + 1, waitTime);
                             }, 300);
                         } else {
+                            console.error('[Popup-DIAG] ❌ 注入失败！');
+                            console.error('[Popup-DIAG] ❌ 可能原因: 扩展权限不足或页面不支持脚本注入');
                             readBtn.disabled = false;
                             showError('Could not inject content script. Please check extension permissions.');
                         }
                     });
                 } else {
+                    console.error('[Popup-DIAG] ❌ 已达到最大重试次数，放弃');
+                    console.error('[Popup-DIAG] ❌ 请尝试: 1. 刷新页面 2. 检查扩展权限 3. 查看网页控制台日志');
                     readBtn.disabled = false;
                     showError('Could not read page content. Please refresh the page and try again.');
                 }
                 return;
             }
 
-            readBtn.disabled = false;
+            console.log('[Popup-DIAG] ✅ 收到 content script 响应');
 
-            if (response) {
-                displayContent(response);
-            } else {
+            if (!response) {
+                console.error('[Popup-DIAG] ❌ 响应为空！');
+                readBtn.disabled = false;
                 showError('No content received');
+                return;
             }
+
+            // Check if content was actually loaded
+            if (!response.dynamicContentLoaded) {
+                console.error('[Popup-DIAG] ❌ 动态内容加载失败！');
+                console.error('[Popup-DIAG] ❌ 失败原因:', response.loadReason);
+                console.error('[Popup-DIAG] ❌ 加载时间:', response.loadTime + 'ms');
+                console.error('[Popup-DIAG] ❌ DOM 变异次数:', response.mutationCount);
+            }
+
+            // Check if body text is empty
+            if (!response.bodyText || response.bodyText.length === 0) {
+                console.error('[Popup-DIAG] ❌ 提取的文本内容为空！');
+                console.error('[Popup-DIAG] ❌ 可能原因: 1. 内容在 Shadow DOM 中 2. 内容在 iframe 中 3. 页面使用特殊框架');
+            } else {
+                console.log('[Popup-DIAG] ✅ 提取文本长度:', response.bodyText.length, '字符');
+            }
+
+            readBtn.disabled = false;
+            displayContent(response);
         });
     }
 
     readBtn.addEventListener('click', function() {
+        console.log('[Popup-DIAG] ========== 用户点击读取按钮 ==========');
         readBtn.disabled = true;
         showLoading();
 
         chrome.tabs.query({active: true, currentWindow: true}, function(tabs) {
             if (tabs.length === 0) {
+                console.error('[Popup-DIAG] ❌ 未找到活动标签页');
                 showError('No active tab found');
                 readBtn.disabled = false;
                 return;
             }
 
             const activeTab = tabs[0];
+            console.log('[Popup-DIAG] 📋 活动标签页信息:', {
+                'ID': activeTab.id,
+                'URL': activeTab.url,
+                '标题': activeTab.title,
+                '状态': activeTab.status
+            });
 
             if (activeTab.url.startsWith('chrome://') || activeTab.url.startsWith('edge://') || activeTab.url.startsWith('about:')) {
+                console.error('[Popup-DIAG] ❌ 浏览器内部页面，不支持读取');
                 readBtn.disabled = false;
                 showError('Cannot read content from this page (browser internal page)');
                 return;
