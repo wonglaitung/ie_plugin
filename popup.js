@@ -207,7 +207,7 @@
 
     function loadApiKey(callback) {
         chrome.storage.local.get(['qwenApiKey'], function(result) {
-            callback(result.qwenApiKey || '');
+            callback(result.qwenApiKey || '12345678');
         });
     }
 
