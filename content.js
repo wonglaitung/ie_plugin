@@ -140,76 +140,174 @@
     }
 
     /**
-     * Extract content from Shadow DOM
+     * Extract all visible text using TreeWalker with recursive iframe and Shadow DOM support
      */
-    function extractShadowContent(rootElement) {
-        const shadowRoots = [];
-        
-        function traverse(element) {
-            if (element.shadowRoot) {
-                shadowRoots.push(element.shadowRoot);
-                traverse(element.shadowRoot);
-            }
-            
-            Array.from(element.children).forEach(child => traverse(child));
+    function extractAllVisibleText(doc = document) {
+        try {
+            const EXCLUDE_TAGS = new Set([
+                'SCRIPT',
+                'STYLE',
+                'NOSCRIPT',
+                'SVG',
+                'CANVAS',
+                'OBJECT',
+                'EMBED'
+            ]);
+
+            const texts = [];
+            const processedDocs = new WeakSet();
+
+            const isVisibleElement = (el) => {
+                try {
+                    const htmlEl = el;
+
+                    if (htmlEl.hasAttribute('hidden')) return false;
+                    if (htmlEl.getAttribute('aria-hidden') === 'true') return false;
+
+                    const view = htmlEl.ownerDocument.defaultView;
+                    const style = view?.getComputedStyle(htmlEl);
+                    if (!style) return true;
+
+                    if (style.display === 'none') return false;
+                    if (style.visibility === 'hidden') return false;
+                    if (style.opacity === '0') return false;
+
+                    return true;
+                } catch (err) {
+                    console.warn('[PageInsight-DIAG] ⚠️ 可见性检测失败:', err.message);
+                    return true;
+                }
+            };
+
+            const walkRoot = (root) => {
+                try {
+                    if (processedDocs.has(root)) return;
+                    processedDocs.add(root);
+
+                    const treeWalker = document.createTreeWalker(
+                        root,
+                        NodeFilter.SHOW_TEXT,
+                        {
+                            acceptNode(node) {
+                                try {
+                                    const parent = node.parentElement;
+                                    if (!parent) return NodeFilter.FILTER_REJECT;
+
+                                    if (EXCLUDE_TAGS.has(parent.tagName)) {
+                                        return NodeFilter.FILTER_REJECT;
+                                    }
+
+                                    if (!isVisibleElement(parent)) {
+                                        return NodeFilter.FILTER_REJECT;
+                                    }
+
+                                    const t = (node.nodeValue || '').trim();
+                                    if (!t) return NodeFilter.FILTER_REJECT;
+
+                                    return NodeFilter.FILTER_ACCEPT;
+                                } catch (err) {
+                                    console.warn('[PageInsight-DIAG] ⚠️ 节点过滤失败:', err.message);
+                                    return NodeFilter.FILTER_REJECT;
+                                }
+                            },
+                        }
+                    );
+
+                    let n = treeWalker.nextNode();
+                    while (n) {
+                        const t = (n.nodeValue || '').trim();
+                        if (t) texts.push(t);
+                        n = treeWalker.nextNode();
+                    }
+
+                    const elementWalker = document.createTreeWalker(
+                        root,
+                        NodeFilter.SHOW_ELEMENT
+                    );
+
+                    let e = elementWalker.nextNode();
+                    while (e) {
+                        const el = e;
+
+                        if (el.shadowRoot) {
+                            walkRoot(el.shadowRoot);
+                        }
+
+                        if (el.tagName === 'IFRAME') {
+                            try {
+                                const iframe = el;
+                                const childDoc = iframe.contentDocument;
+
+                                if (childDoc) {
+                                    console.log('[PageInsight-DIAG] ✅ 递归提取 iframe:', iframe.src || iframe.name || '(匿名 iframe)');
+                                    walkRoot(childDoc);
+                                }
+                            } catch (err) {
+                                console.warn('[PageInsight-DIAG] ⚠️ 跨域 iframe 无法访问:', el.src || el.name);
+                            }
+                        }
+
+                        e = elementWalker.nextNode();
+                    }
+                } catch (err) {
+                    console.error('[PageInsight-DIAG] ❌ 遍历根节点失败:', err.message);
+                }
+            };
+
+            walkRoot(doc);
+
+            return texts.join('\n');
+        } catch (err) {
+            console.error('[PageInsight-DIAG] ❌ 文本提取失败:', err.message);
+            return '';
         }
-        
-        traverse(rootElement);
-        
-        return shadowRoots.map(root => ({
-            html: root.innerHTML,
-            text: extractText(root),
-            links: Array.from(root.querySelectorAll('a')).map(a => ({
-                text: a.textContent.trim(),
-                href: a.href
-            })).filter(link => link.href && link.text),
-            images: Array.from(root.querySelectorAll('img')).map(img => ({
-                src: img.src,
-                alt: img.alt
-            })).filter(img => img.src)
-        }));
     }
 
     /**
      * Extract content from same-origin iframes
      */
     function extractIframeContent() {
-        const iframes = Array.from(document.querySelectorAll('iframe'));
-        const iframeContents = [];
+        try {
+            const iframes = Array.from(document.querySelectorAll('iframe'));
+            const iframeContents = [];
 
-        console.log('[PageInsight-DIAG] 🔍 检测到', iframes.length, '个 iframe');
+            console.log('[PageInsight-DIAG] 🔍 检测到', iframes.length, '个 iframe');
 
-        iframes.forEach((iframe, index) => {
-            try {
-                if (iframe.contentDocument) {
-                    const iframeText = extractText(iframe.contentDocument.body);
-                    iframeContents.push({
+            iframes.forEach((iframe, index) => {
+                try {
+                    if (iframe.contentDocument) {
+                        const iframeText = extractText(iframe.contentDocument.body);
+                        iframeContents.push({
+                            src: iframe.src,
+                            title: iframe.contentDocument.title,
+                            text: iframeText,
+                            html: iframe.contentDocument.body.innerHTML
+                        });
+                        console.log('[PageInsight-DIAG] ✅ iframe #' + (index + 1) + ' (同源):', {
+                            src: iframe.src,
+                            title: iframe.contentDocument.title,
+                            textLength: iframeText.length
+                        });
+                    }
+                } catch (e) {
+                    console.warn('[PageInsight-DIAG] ⚠️ iframe #' + (index + 1) + ' (跨源):', {
                         src: iframe.src,
-                        title: iframe.contentDocument.title,
-                        text: iframeText,
-                        html: iframe.contentDocument.body.innerHTML
-                    });
-                    console.log('[PageInsight-DIAG] ✅ iframe #' + (index + 1) + ' (同源):', {
-                        src: iframe.src,
-                        title: iframe.contentDocument.title,
-                        textLength: iframeText.length
+                        reason: '跨源限制，无法访问内容'
                     });
                 }
-            } catch (e) {
-                console.warn('[PageInsight-DIAG] ⚠️ iframe #' + (index + 1) + ' (跨源):', {
-                    src: iframe.src,
-                    reason: '跨源限制，无法访问内容'
-                });
-            }
-        });
+            });
 
-        console.log('[PageInsight-DIAG] 📊 iframe 提取结果:', {
-            '总数': iframes.length,
-            '同源可访问': iframeContents.length,
-            '跨源不可访问': iframes.length - iframeContents.length
-        });
+            console.log('[PageInsight-DIAG] 📊 iframe 提取结果:', {
+                '总数': iframes.length,
+                '同源可访问': iframeContents.length,
+                '跨源不可访问': iframes.length - iframeContents.length
+            });
 
-        return iframeContents;
+            return iframeContents;
+        } catch (err) {
+            console.error('[PageInsight-DIAG] ❌ iframe 提取失败:', err.message);
+            return [];
+        }
     }
 
     /**
@@ -240,94 +338,105 @@
      * Extract all visible content from the page
      */
     function getPageContent() {
-        console.log('[PageInsight-DIAG] ========== 开始提取页面内容 ==========');
+        try {
+            console.log('[PageInsight-DIAG] ========== 开始提取页面内容 ==========');
 
-        // Use document.documentElement instead of document.body to capture everything
-        const rootElement = document.documentElement || document.body;
+            const rootElement = document.documentElement || document.body;
 
-        // Check if body exists
-        if (!document.body) {
-            console.error('[PageInsight-DIAG] ❌ 严重问题: document.body 不存在！');
-            console.error('[PageInsight-DIAG] ❌ 可能原因: 页面尚未加载完成或使用了特殊框架');
+            if (!document.body) {
+                console.error('[PageInsight-DIAG] ❌ 严重问题: document.body 不存在！');
+                console.error('[PageInsight-DIAG] ❌ 可能原因: 页面尚未加载完成或使用了特殊框架');
+            }
+
+            const bodyText = extractAllVisibleText(document);
+            if (bodyText.length === 0) {
+                console.error('[PageInsight-DIAG] ❌ 严重问题: 页面文本内容为空！');
+                console.error('[PageInsight-DIAG] ❌ 可能原因: 内容未加载、使用 Shadow DOM 或使用了 iframe');
+            } else {
+                console.log('[PageInsight-DIAG] ✅ 页面文本长度:', bodyText.length, '字符');
+                console.log('[PageInsight-DIAG] 📝 文本预览:', bodyText.substring(0, 150) + '...');
+            }
+
+            const content = {
+                title: document.title,
+                url: window.location.href,
+                bodyText: bodyText,
+                html: rootElement.innerHTML,
+                metaTags: Array.from(document.querySelectorAll('meta')).map(meta => ({
+                    name: meta.getAttribute('name'),
+                    content: meta.getAttribute('content'),
+                    property: meta.getAttribute('property')
+                })).filter(meta => meta.name || meta.property),
+                links: Array.from(rootElement.querySelectorAll('a')).map(a => ({
+                    text: a.textContent.trim(),
+                    href: a.href
+                })).filter(link => link.href && link.text),
+                images: Array.from(rootElement.querySelectorAll('img')).map(img => ({
+                    src: img.src,
+                    alt: img.alt
+                })).filter(img => img.src),
+                forms: Array.from(rootElement.querySelectorAll('form')).map(form => ({
+                    action: form.action,
+                    method: form.method,
+                    inputs: Array.from(form.querySelectorAll('input, textarea, select')).map(input => ({
+                        type: input.type,
+                        name: input.name,
+                        value: input.value,
+                        placeholder: input.placeholder
+                    }))
+                })),
+                buttons: Array.from(rootElement.querySelectorAll('button')).map(btn => ({
+                    text: btn.textContent.trim(),
+                    type: btn.type,
+                    disabled: btn.disabled
+                })),
+                popups: extractPopupContent(),
+                iframes: extractIframeContent(),
+                readyState: document.readyState,
+                scrollY: window.scrollY,
+                scrollHeight: document.documentElement.scrollHeight,
+                viewportHeight: window.innerHeight
+            };
+
+            console.log('[PageInsight-DIAG] 📊 提取结果统计:', {
+                '链接数': content.links.length,
+                '图片数': content.images.length,
+                '表单数': content.forms.length,
+                '按钮数': content.buttons.length,
+                'iframe 数': content.iframes.length,
+                '弹窗数': content.popups.length
+            });
+
+            if (content.iframes.length > 0) {
+                console.warn('[PageInsight-DIAG] ⚠️ 检测到 ' + content.iframes.length + ' 个 iframe');
+                console.warn('[PageInsight-DIAG] ⚠️ iframe 内容已递归提取并包含在 bodyText 中');
+                console.warn('[PageInsight-DIAG] ⚠️ 注意: 跨源 iframe 的内容无法访问');
+            }
+
+            console.log('[PageInsight-DIAG] ========== 内容提取完成 ==========');
+            return content;
+        } catch (err) {
+            console.error('[PageInsight-DIAG] ❌ 页面内容提取失败:', err.message);
+            console.error('[PageInsight-DIAG] ❌ 错误堆栈:', err.stack);
+            return {
+                title: document.title,
+                url: window.location.href,
+                bodyText: '',
+                html: '',
+                metaTags: [],
+                links: [],
+                images: [],
+                forms: [],
+                buttons: [],
+                popups: [],
+                iframes: [],
+                readyState: document.readyState,
+                scrollY: window.scrollY,
+                scrollHeight: document.documentElement.scrollHeight,
+                viewportHeight: window.innerHeight,
+                error: err.message
+            };
         }
-
-        // Check body content
-        const bodyText = extractText(rootElement);
-        if (bodyText.length === 0) {
-            console.error('[PageInsight-DIAG] ❌ 严重问题: 页面文本内容为空！');
-            console.error('[PageInsight-DIAG] ❌ 可能原因: 内容未加载、使用 Shadow DOM 或使用了 iframe');
-        } else {
-            console.log('[PageInsight-DIAG] ✅ 页面文本长度:', bodyText.length, '字符');
-            console.log('[PageInsight-DIAG] 📝 文本预览:', bodyText.substring(0, 150) + '...');
-        }
-
-        const content = {
-            title: document.title,
-            url: window.location.href,
-            bodyText: bodyText,
-            html: rootElement.innerHTML,
-            metaTags: Array.from(document.querySelectorAll('meta')).map(meta => ({
-                name: meta.getAttribute('name'),
-                content: meta.getAttribute('content'),
-                property: meta.getAttribute('property')
-            })).filter(meta => meta.name || meta.property),
-            links: Array.from(rootElement.querySelectorAll('a')).map(a => ({
-                text: a.textContent.trim(),
-                href: a.href
-            })).filter(link => link.href && link.text),
-            images: Array.from(rootElement.querySelectorAll('img')).map(img => ({
-                src: img.src,
-                alt: img.alt
-            })).filter(img => img.src),
-            forms: Array.from(rootElement.querySelectorAll('form')).map(form => ({
-                action: form.action,
-                method: form.method,
-                inputs: Array.from(form.querySelectorAll('input, textarea, select')).map(input => ({
-                    type: input.type,
-                    name: input.name,
-                    value: input.value,
-                    placeholder: input.placeholder
-                }))
-            })),
-            buttons: Array.from(rootElement.querySelectorAll('button')).map(btn => ({
-                text: btn.textContent.trim(),
-                type: btn.type,
-                disabled: btn.disabled
-            })),
-            // Dynamic content detection
-            popups: extractPopupContent(),
-            shadowDOM: extractShadowContent(rootElement),
-            iframes: extractIframeContent(),
-            // Page state
-            readyState: document.readyState,
-            scrollY: window.scrollY,
-            scrollHeight: document.documentElement.scrollHeight,
-            viewportHeight: window.innerHeight
-        };
-
-        // Log extraction summary with focus on potential issues
-        console.log('[PageInsight-DIAG] 📊 提取结果统计:', {
-            '链接数': content.links.length,
-            '图片数': content.images.length,
-            '表单数': content.forms.length,
-            '按钮数': content.buttons.length,
-            'Shadow DOM 数': content.shadowDOM.length,
-            'iframe 数': content.iframes.length,
-            '弹窗数': content.popups.length
-        });
-
-        if (content.shadowDOM.length > 0) {
-            console.warn('[PageInsight-DIAG] ⚠️ 检测到 Shadow DOM，可能影响内容提取');
-        }
-
-        if (content.iframes.length > 0) {
-            console.warn('[PageInsight-DIAG] ⚠️ 检测到 ' + content.iframes.length + ' 个 iframe');
-            console.warn('[PageInsight-DIAG] ⚠️ iframe 内容已提取并包含在结果中');
-            console.warn('[PageInsight-DIAG] ⚠️ 注意: 跨源 iframe 的内容无法访问');
-        }
-
-        console.log('[PageInsight-DIAG] ========== 内容提取完成 ==========');
-        return content;
     }
 
     /**
@@ -338,9 +447,14 @@
             mutationObserver.disconnect();
         }
 
+        let debounceTimer = null;
+
         mutationObserver = new MutationObserver((mutations) => {
-            lastMutationTime = Date.now();
-            mutationCount += mutations.length;
+            clearTimeout(debounceTimer);
+            debounceTimer = setTimeout(() => {
+                lastMutationTime = Date.now();
+                mutationCount += mutations.length;
+            }, 100);
         });
 
         mutationObserver.observe(document.documentElement, {
@@ -349,6 +463,38 @@
             attributes: false,
             characterData: false
         });
+    }
+
+    /**
+     * Set up route change listener for SPA applications
+     */
+    function setupRouteChangeListener() {
+        const originalPushState = history.pushState;
+        const originalReplaceState = history.replaceState;
+
+        history.pushState = function(...args) {
+            const oldUrl = window.location.href;
+            originalPushState.apply(this, args);
+            const newUrl = window.location.href;
+            console.log('[PageInsight-DIAG] 🔄 路由变化 (pushState):', oldUrl, '→', newUrl);
+        };
+
+        history.replaceState = function(...args) {
+            const oldUrl = window.location.href;
+            originalReplaceState.apply(this, args);
+            const newUrl = window.location.href;
+            console.log('[PageInsight-DIAG] 🔄 路由变化 (replaceState):', oldUrl, '→', newUrl);
+        };
+
+        window.addEventListener('popstate', () => {
+            console.log('[PageInsight-DIAG] 🔄 路由变化 (popstate):', window.location.href);
+        });
+
+        window.addEventListener('hashchange', () => {
+            console.log('[PageInsight-DIAG] 🔄 路由变化 (hashchange):', window.location.href);
+        });
+
+        console.log('[PageInsight-DIAG] ✅ 路由变化监听器已启动');
     }
 
     /**
@@ -474,6 +620,9 @@
             return true; // Keep the message channel open for async response
         }
     });
+
+    // Setup route change listener for SPA applications
+    setupRouteChangeListener();
 
     // Log that content script is loaded
     console.log('Page Content Reader extension loaded');
